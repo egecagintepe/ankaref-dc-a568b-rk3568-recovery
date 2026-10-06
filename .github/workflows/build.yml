@@ -16,6 +16,13 @@ jobs:
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
           sudo apt-get update && sudo apt-get install -y gdisk dosfstools zstd xxd e2fsprogs shellcheck u-boot-tools
           df -h /
+      - name: Register QEMU binfmt on host
+        run: |
+          sudo apt-get install -y qemu-user-static binfmt-support
+          mountpoint -q /proc/sys/fs/binfmt_misc || sudo mount -t binfmt_misc none /proc/sys/fs/binfmt_misc
+          docker run --privileged --rm tonistiigi/binfmt --install all
+          sudo update-binfmts --enable || true
+          ls /proc/sys/fs/binfmt_misc
       - name: Clone Armbian build framework (pinned)
         run: |
           git clone https://github.com/armbian/build.git armbian
