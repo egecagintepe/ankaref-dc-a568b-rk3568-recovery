@@ -37,7 +37,7 @@ jobs:
         run: |
           cd armbian
           ./compile.sh build BOARD=ztl-a568 BRANCH=current RELEASE=bookworm BUILD_MINIMAL=yes BUILD_DESKTOP=no \
-            KERNEL_CONFIGURE=no EXPERT=yes COMPRESS_OUTPUTIMAGE=sha SHOW_LOG=yes
+            KERNEL_CONFIGURE=no KERNEL_BTF=no EXPERT=yes COMPRESS_OUTPUTIMAGE=sha SHOW_LOG=yes
           ls -l output/images
           mkdir -p ../work && mv output/images/*.img ../work/target.img && rm -f output/images/*
       - name: Package target payload
@@ -56,7 +56,7 @@ jobs:
           { echo "Great Wall Recovery - DC_A568 RK3568"; echo "built: $(date -u +%FT%TZ)"; echo "armbian/build: $(cat armbian-commit.txt)"; echo "github run: $GITHUB_RUN_ID"; } > armbian/userpatches/overlay/gwr-build-info
           cd armbian
           ./compile.sh build BOARD=ztl-a568 BRANCH=current RELEASE=bookworm BUILD_MINIMAL=yes BUILD_DESKTOP=no \
-            KERNEL_CONFIGURE=no EXPERT=yes COMPRESS_OUTPUTIMAGE=sha SHOW_LOG=yes \
+            KERNEL_CONFIGURE=no KERNEL_BTF=no EXPERT=yes COMPRESS_OUTPUTIMAGE=sha SHOW_LOG=yes \
             PACKAGE_LIST_ADDITIONAL="gdisk zstd mmc-utils u-boot-tools dosfstools e2fsprogs"
           mv output/images/*.img ../work/great-wall-dc-a568-recovery.img
           grep -rhoE "(linux|u-boot)[^ ]*(commit|sha|rev)[^ ]*[ =:]+[0-9a-f]{7,40}" output/logs 2>/dev/null | sort -u > ../work/source-commits.txt || true
