@@ -1,0 +1,65 @@
+name: Verify and patch recovery image (no Armbian rebuild)
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "Run id of the build workflow whose artifact to verify"
+        required: true
+permissions:
+  contents: read
+  actions: read
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tools
+        run: sudo apt-get update && sudo apt-get install -y gdisk dosfstools zstd xxd e2fsprogs shellcheck
+      - name: Download artifact
+        run: |
+          mkdir art
+          gh run download "${{ inputs.run_id }}" -R "$GITHUB_REPOSITORY" -n great-wall-recovery -D art
+          ls -l art; (cd art && sha256sum -c great-wall-dc-a568-recovery.img.sha256)
+      - name: Static checks of repo scripts
+        run: |
+          bash -n custom/userpatches/overlay/gwr-recovery.sh scripts/*.sh
+          shellcheck -S error custom/userpatches/overlay/gwr-recovery.sh scripts/*.sh
+      - name: Verify image EXACTLY as built (before any change)
+        continue-on-error: true
+        run: bash scripts/verify-image.sh art/great-wall-dc-a568-recovery.img 2>&1 | tee verify-original.txt; exit ${PIPESTATUS[0]}
+      - name: Replace only gwr-recovery.sh inside the image rootfs
+        run: |
+          IMG=art/great-wall-dc-a568-recovery.img
+          LO=$(sudo losetup -fP --show "$IMG")
+          RP=$(sudo blkid -o device -t LABEL=armbi_root | grep "^$LO")
+          sudo mkdir -p /mnt/p-root && sudo mount "$RP" /mnt/p-root
+          sha256sum /mnt/p-root/usr/local/sbin/gwr-recovery.sh | tee old-script.sha256
+          sudo install -m 0755 custom/userpatches/overlay/gwr-recovery.sh /mnt/p-root/usr/local/sbin/gwr-recovery.sh
+          sha256sum /mnt/p-root/usr/local/sbin/gwr-recovery.sh | tee new-script.sha256
+          sync; sudo umount /mnt/p-root; sudo losetup -d "$LO"
+      - name: Verify patched image
+        run: bash scripts/verify-image.sh art/great-wall-dc-a568-recovery.img 2>&1 | tee verify-final.txt; exit ${PIPESTATUS[0]}
+      - name: Package
+        run: |
+          mkdir -p out/source-patches
+          cd out
+          cp ../art/great-wall-dc-a568-recovery.img .
+          zstd -3 -T0 -f great-wall-dc-a568-recovery.img -o great-wall-dc-a568-recovery.img.zst
+          sha256sum great-wall-dc-a568-recovery.img > great-wall-dc-a568-recovery.img.sha256
+          cp ../docs/* . ; cp -r ../custom/* source-patches/; cp -r ../scripts source-patches/; cp ../art/source-commits.txt ../art/armbian-commit.txt . 2>/dev/null || cp ../art/source-patches/armbian-commit.txt . 2>/dev/null || true
+          cp ../verify-original.txt ../verify-final.txt ../old-script.sha256 ../new-script.sha256 .
+          { echo "# BUILD-REPORT"; echo; echo "Image: $(stat -c %s great-wall-dc-a568-recovery.img) bytes"
+            echo "Built by build workflow run ${{ inputs.run_id }}; only /usr/local/sbin/gwr-recovery.sh was replaced afterwards (verify workflow run $GITHUB_RUN_ID)."
+            echo; echo "old script: $(cat old-script.sha256)"; echo "new script: $(cat new-script.sha256)"
+            echo; echo "## Verification of image exactly as built"; cat verify-original.txt
+            echo; echo "## Verification of final image"; cat verify-final.txt
+            echo; echo "## Armbian / source commits"; cat armbian-commit.txt source-commits.txt 2>/dev/null; } > BUILD-REPORT.md
+      - uses: actions/upload-artifact@v4
+        with:
+          name: great-wall-recovery-verified
+          path: out/
+          retention-days: 14
+          compression-level: 0
