@@ -1,0 +1,10 @@
+work/
+out/
+armbian/
+*.img
+*.img.zst
+*.log
+.env
+*.pem
+*.key
+id_rsa*

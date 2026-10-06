@@ -1,0 +1,7 @@
+Write great-wall-dc-a568-recovery.img to the SD card (this ERASES the SD card).
+Windows: use balenaEtcher or Raspberry Pi Imager ("Use custom"). Select the img (or decompress the .zst first
+with 7-Zip-zstd / zstd.exe). Check the SHA256 in great-wall-dc-a568-recovery.img.sha256 first.
+Boot: insert SD, power the DC-A568B, wait until it powers off by itself (up to ~1.5 h in the worst case:
+discard/zero-write + install). Then put the SD in a PC and open the RECOVERYLOG drive: RECOVERY-RESULT.txt.
+If the first line is RESULT=EMMC_RECOVERED_AND_LINUX_INSTALLED: remove the SD and power-cycle.
+Note: Windows may offer to "format" the Linux partitions - cancel; only RECOVERYLOG is readable.

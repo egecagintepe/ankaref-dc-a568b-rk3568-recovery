@@ -1,0 +1,12 @@
+[Unit]
+Description=Great Wall Recovery - DC_A568 eMMC recovery
+After=local-fs.target systemd-udevd.service
+Before=network-pre.target
+DefaultDependencies=no
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/gwr-recovery.sh
+TimeoutStartSec=0
+RemainAfterExit=yes
+[Install]
+WantedBy=multi-user.target

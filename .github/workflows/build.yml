@@ -1,0 +1,79 @@
+name: Great Wall Recovery - DC_A568 RK3568
+on:
+  workflow_dispatch:
+    inputs:
+      armbian_ref:
+        description: "armbian/build commit/branch to pin (default main)"
+        default: main
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 340
+    steps:
+      - uses: actions/checkout@v4
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          sudo apt-get update && sudo apt-get install -y gdisk dosfstools zstd xxd e2fsprogs shellcheck u-boot-tools
+          df -h /
+      - name: Clone Armbian build framework (pinned)
+        run: |
+          git clone https://github.com/armbian/build.git armbian
+          git -C armbian checkout "${{ inputs.armbian_ref }}"
+          git -C armbian rev-parse HEAD | tee armbian-commit.txt
+          test -f armbian/config/boards/ztl-a568.wip -o -f armbian/config/boards/ztl-a568.csc
+      - name: Static checks of recovery scripts
+        run: |
+          bash -n custom/userpatches/overlay/gwr-recovery.sh scripts/*.sh
+          shellcheck -S error custom/userpatches/overlay/gwr-recovery.sh scripts/*.sh
+      - name: Build TARGET image (plain Armbian ZTL-A568, installed to eMMC on success)
+        run: |
+          cd armbian
+          ./compile.sh build BOARD=ztl-a568 BRANCH=current RELEASE=bookworm BUILD_MINIMAL=yes BUILD_DESKTOP=no \
+            KERNEL_CONFIGURE=no EXPERT=yes COMPRESS_OUTPUTIMAGE=sha SHOW_LOG=yes
+          ls -l output/images
+          mkdir -p ../work && mv output/images/*.img ../work/target.img && rm -f output/images/*
+      - name: Package target payload
+        run: |
+          cd work
+          stat -c %s target.img > target.img.size
+          sha256sum target.img > target.img.sha256
+          zstd -19 -T0 -f target.img -o target.img.zst
+          sgdisk -p target.img
+          rm target.img
+      - name: Build RECOVERY image
+        run: |
+          mkdir -p armbian/userpatches/overlay
+          cp custom/userpatches/customize-image.sh armbian/userpatches/
+          cp custom/userpatches/overlay/* armbian/userpatches/overlay/
+          { echo "Great Wall Recovery - DC_A568 RK3568"; echo "built: $(date -u +%FT%TZ)"; echo "armbian/build: $(cat armbian-commit.txt)"; echo "github run: $GITHUB_RUN_ID"; } > armbian/userpatches/overlay/gwr-build-info
+          cd armbian
+          ./compile.sh build BOARD=ztl-a568 BRANCH=current RELEASE=bookworm BUILD_MINIMAL=yes BUILD_DESKTOP=no \
+            KERNEL_CONFIGURE=no EXPERT=yes COMPRESS_OUTPUTIMAGE=sha SHOW_LOG=yes \
+            PACKAGE_LIST_ADDITIONAL="gdisk zstd mmc-utils u-boot-tools dosfstools e2fsprogs"
+          mv output/images/*.img ../work/great-wall-dc-a568-recovery.img
+          grep -rhoE "(linux|u-boot)[^ ]*(commit|sha|rev)[^ ]*[ =:]+[0-9a-f]{7,40}" output/logs 2>/dev/null | sort -u > ../work/source-commits.txt || true
+          cp output/images/*.sha output/images/*.txt ../work/ 2>/dev/null || true
+      - name: Append RECOVERYLOG partition + payload
+        run: |
+          cd work
+          bash ../scripts/postprocess.sh great-wall-dc-a568-recovery.img target.img.zst target.img.size target.img.sha256
+      - name: Verify
+        run: |
+          cd work
+          bash ../scripts/verify-image.sh great-wall-dc-a568-recovery.img | tee verify.txt
+      - name: Collect deliverables
+        run: |
+          mkdir -p out/source-patches && cd out
+          cp ../work/great-wall-dc-a568-recovery.img .
+          zstd -3 -T0 -f great-wall-dc-a568-recovery.img -o great-wall-dc-a568-recovery.img.zst
+          sha256sum great-wall-dc-a568-recovery.img > great-wall-dc-a568-recovery.img.sha256
+          cp -r ../custom/* source-patches/; cp ../docs/* . ; cp ../work/verify.txt ../work/source-commits.txt . 2>/dev/null || true
+          cp ../armbian-commit.txt source-patches/
+          { echo "# BUILD-REPORT"; echo; echo "Image size: $(stat -c %s great-wall-dc-a568-recovery.img) bytes"; echo "Armbian commit: $(cat ../armbian-commit.txt)"; echo; echo '## Verification'; cat verify.txt; echo; echo '## Source commits seen in logs'; cat source-commits.txt; } > BUILD-REPORT.md
+      - uses: actions/upload-artifact@v4
+        with:
+          name: great-wall-recovery
+          path: out/
+          retention-days: 14
+          compression-level: 0
