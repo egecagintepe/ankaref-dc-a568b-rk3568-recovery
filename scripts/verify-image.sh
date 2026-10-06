@@ -26,6 +26,10 @@ chk "recovery service enabled" "[ -L $R/etc/systemd/system/multi-user.target.wan
 chk "recovery script installed" "[ -x $R/usr/local/sbin/gwr-recovery.sh ]"
 chk "resize service disabled" "! [ -L $R/etc/systemd/system/*.wants/armbian-resize-filesystem.service ]"
 chk "payload present+sha" "[ -s /mnt/v-log/payload/target.img.zst ] && [ -s /mnt/v-log/payload/target.img.sha256 ]"
+chk "service does not delay network (no network-pre ordering)" "! grep -q network-pre $R/etc/systemd/system/gwr-recovery.service"
+chk "service Type=exec" "grep -q '^Type=exec' $R/etc/systemd/system/gwr-recovery.service"
+chk "LIVE-STATUS.txt support" "grep -q 'LIVE-STATUS.txt' $R/usr/local/sbin/gwr-recovery.sh && grep -q 'live FAILURE FINAL_RESULT' $R/usr/local/sbin/gwr-recovery.sh"
+chk "LED only via verified DT node (no raw GPIO)" "grep -q 'leds/led-0' $R/usr/local/sbin/gwr-recovery.sh && ! grep -qE '/sys/class/gpio|devmem' $R/usr/local/sbin/gwr-recovery.sh"
 chk "destructive-command + guard static review" "bash $(dirname "$0")/check-destructive.sh $R/usr/local/sbin/gwr-recovery.sh"
 echo "== recovery script from image (head of guard)"; awk '/^gwr_guard\(\)/,/^}/' $R/usr/local/sbin/gwr-recovery.sh
 echo "== payload"; (cd /mnt/v-log/payload && cat target.img.size target.img.sha256 && zstdcat target.img.zst | sha256sum)

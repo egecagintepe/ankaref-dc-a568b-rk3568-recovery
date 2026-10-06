@@ -1,12 +1,15 @@
 [Unit]
 Description=Great Wall Recovery - DC_A568 eMMC recovery
-After=local-fs.target systemd-udevd.service
-Before=network-pre.target
+# Runs independently of networking: NO Before=network-pre.target, so Ethernet/DHCP start in parallel.
 DefaultDependencies=no
+After=local-fs.target systemd-udevd.service
+Conflicts=shutdown.target
+Before=shutdown.target
 [Service]
-Type=oneshot
+# Type=exec: considered started immediately, so nothing (network, multi-user.target) waits for the
+# 15+ minute recovery run to finish.
+Type=exec
 ExecStart=/usr/local/sbin/gwr-recovery.sh
 TimeoutStartSec=0
-RemainAfterExit=yes
 [Install]
 WantedBy=multi-user.target

@@ -38,6 +38,22 @@ is fe2b0000; the 461 GiB card is excluded by the host-path and capacity checks i
 A plain Armbian ZTL-A568 image built from the same board config (target.img.zst on RECOVERYLOG/payload).
 Rockchip BootROM reads the same LBA64 idbloader layout from eMMC as from SD. Not boot-tested on hardware.
 
+## Observability (added after build run 37435798097)
+- **LIVE-STATUS.txt** on RECOVERYLOG: STATE / STAGE / ATTEMPT / RESULT / UPDATED / ELAPSED_S, replaced atomically
+  (tmp file + rename). Stages: LINUX_BOOTED, INITIAL_DIAGNOSTICS, EMMC_REPROBE n/4, EMMC_DETECTED, TARGET_GUARD, ERASE,
+  READWRITE_VERIFY, INSTALL, FINAL_RESULT. A quick-look aid only; the logs remain authoritative.
+- **Console/journal:** `say()` also writes to /dev/kmsg (-> serial/HDMI console, dmesg, journal); no console = no effect.
+- **LED (optional, fail-safe):** upstream rk3568-ztl-a568.dts defines `leds/led-0` (gpio-leds, blue, gpio0 RK_PC0,
+  heartbeat). The script drives it through /sys/class/leds only if the running DT matches: model "ZTL A568",
+  gpio-leds parent, node leds/led-0, gpios = <&gpio0 16 0>. Else signalling is off. No raw GPIO access.
+  Patterns: BOOTED_LINUX triple blink; RECOVERY_RUNNING slow 1s/1s; EMMC_DETECTED double blink; DESTRUCTIVE_RECOVERY fast
+  0.1s; SUCCESS steady on; FAILURE triple blink + pause. Not verified: that the V01 PCB wires/populates this LED
+  (upstream DTS was written for board revision V06).
+- **Network:** gwr-recovery.service no longer has Before=network-pre.target and is Type=exec, so network/DHCP start in
+  parallel; recovery does not depend on network. SSH is still disabled in the image on purpose (default root password).
+  Ethernet link/DHCP lease/ping are the externally visible signs of life.
+- **UART:** stdout-path serial2:1500000n8 (uart2 enabled) and Armbian's boot script adds console=ttyS2,1500000 with the
+  default console=both. Unchanged. Pin locations are not verified here.
+
 ## Not implemented
-LED signalling (secondary; DTS LED nodes not verified). Kernel/U-Boot source patches: none (no kernel or U-Boot
-patch applied; the stock Armbian kernel's DYNAMIC_DEBUG is assumed - check mmc-trace.txt).
+Kernel/U-Boot source patches: none (stock Armbian kernel; DYNAMIC_DEBUG assumed, see mmc-trace.txt).

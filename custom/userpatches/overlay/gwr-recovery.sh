@@ -26,8 +26,58 @@ mount_log() {
 mount_log
 mkdir -p "$MNT/STATE"
 DA="$MNT/destructive-actions.txt"; HW="$MNT/hardware-identification.txt"
-say() { echo "[$(ts)] $*" | tee -a "$MNT/recovery-run.log" >&2; }
+say() { echo "[$(ts)] $*" | tee -a "$MNT/recovery-run.log" >&2; { echo "gwr: $*" > /dev/kmsg; } 2>/dev/null; return 0; }
 dlog() { echo "[$(ts)] $*" >> "$DA"; say "DESTRUCTIVE-LOG: $*"; }
+
+# --- optional observability: LED (verified DT node only) + LIVE-STATUS.txt ----------
+# LED: upstream rk3568-ztl-a568.dts defines leds/led-0 (gpio-leds, blue, gpio0 RK_PC0). It is used ONLY if the
+# running DT matches exactly (model, gpio-leds parent, led-0 node, gpios = <&gpio0 16 0>). Otherwise: no LED, no error.
+LEDDIR=""; LEDPID=""; LEDCUR=""
+led_find() {
+  local l n
+  [ "$(tr -d '\0' < /proc/device-tree/model 2>/dev/null)" = "ZTL A568" ] || return 1
+  for l in /sys/class/leds/*; do
+    [ -e "$l/of_node" ] || continue
+    n=$(readlink -f "$l/of_node")
+    [[ $n == */leds/led-0 ]] || continue
+    grep -aq gpio-leds "$n/../compatible" 2>/dev/null || continue
+    [ "$(od -An -tx1 -v "$n/gpios" 2>/dev/null | tr -d ' \n' | cut -c9-)" = "0000001000000000" ] || continue
+    if [ -w "$l/brightness" ] && [ -w "$l/trigger" ]; then LEDDIR=$l; return 0; fi
+  done
+  return 1
+}
+led_stop() { if [ -n "$LEDPID" ]; then kill "$LEDPID" 2>/dev/null; wait "$LEDPID" 2>/dev/null; LEDPID=""; fi; return 0; }
+trap led_stop EXIT
+led_state() { # states: BOOTED_LINUX RECOVERY_RUNNING EMMC_DETECTED DESTRUCTIVE_RECOVERY SUCCESS FAILURE
+  [ -n "$LEDDIR" ] || return 0
+  [ "$1" = "$LEDCUR" ] && return 0
+  LEDCUR=$1; led_stop
+  echo none > "$LEDDIR/trigger" 2>/dev/null
+  local seq
+  case $1 in
+    BOOTED_LINUX)         seq="1 0.25 0 0.25 1 0.25 0 0.25 1 0.25 0 1.5";;
+    RECOVERY_RUNNING)     seq="1 1 0 1";;
+    EMMC_DETECTED)        seq="1 0.15 0 0.15 1 0.15 0 0.9";;
+    DESTRUCTIVE_RECOVERY) seq="1 0.1 0 0.1";;
+    SUCCESS)              echo 1 > "$LEDDIR/brightness" 2>/dev/null; return 0;;
+    FAILURE)              seq="1 0.15 0 0.15 1 0.15 0 0.15 1 0.15 0 1.2";;
+    *) return 0;;
+  esac
+  ( end=$((SECONDS+7200)); while [ $SECONDS -lt $end ]; do set -- $seq; while [ $# -ge 2 ]; do echo "$1" > "$LEDDIR/brightness"; sleep "$2"; shift 2; done; done ) >/dev/null 2>&1 &
+  LEDPID=$!
+}
+# LIVE-STATUS.txt: tiny human-glance file, atomically replaced (tmp + rename). NOT a log.
+live() { # $1 STATE  $2 STAGE  [$3 ATTEMPT]  [$4 RESULT]
+  {
+    printf 'STATE=%s\nSTAGE=%s\n' "$1" "$2"
+    [ -n "${3:-}" ] && printf 'ATTEMPT=%s\n' "$3"
+    [ -n "${4:-}" ] && printf 'RESULT=%s\n' "$4"
+    printf 'UPDATED=%s\nELAPSED_S=%s\n' "$(ts)" "$(( $(date +%s)-T0 ))"
+  } > "$MNT/.LIVE-STATUS.tmp" 2>/dev/null && mv -f "$MNT/.LIVE-STATUS.tmp" "$MNT/LIVE-STATUS.txt" 2>/dev/null
+  led_state "$1"
+  say "STATE=$1 STAGE=$2${3:+ ATTEMPT=$3}${4:+ RESULT=$4}"
+  return 0
+}
 
 # --- terminal-state marker: never repeat erase on a recovered eMMC ------------
 if [ -f "$MNT/STATE/terminal.done" ] && grep -qE '^RESULT=EMMC_RECOVERED' "$MNT/STATE/terminal.done"; then
@@ -133,6 +183,7 @@ gwr_guard() {
 }
 
 result() { # $1 STATE ; $2 text   (terminal: never returns)
+  case $1 in EMMC_RECOVERED*) live SUCCESS FINAL_RESULT "" "$1";; *) live FAILURE FINAL_RESULT "" "$1";; esac
   {
     echo "RESULT=$1"; echo; echo "$2"; echo
     echo "finished: $(ts) (elapsed $(( $(date +%s)-T0 ))s)"
@@ -146,14 +197,18 @@ result() { # $1 STATE ; $2 text   (terminal: never returns)
 }
 
 # --- Stage 2 main -------------------------------------------------------------
+led_find && say "LED: using $LEDDIR (verified DT node leds/led-0)" || say "LED: unsupported/unverified on this DT, signalling disabled"
+live BOOTED_LINUX LINUX_BOOTED
 dyndbg
 say "start; root=$ROOTSRC rootdisk=$ROOTDISK logdev=${LOGDEV:-none}"
 [ -e /sys/bus/platform/devices/$EMMC_HOST ] || say "$EMMC_HOST platform device absent"
+live RECOVERY_RUNNING INITIAL_DIAGNOSTICS
 collect
 
 DEV=$(find_emmc)
 for att in 1 2 3 4; do
   [ -n "$DEV" ] && break
+  live RECOVERY_RUNNING EMMC_REPROBE "$att/4"
   say "eMMC reprobe attempt $att/4"
   reprobe
   DEV=$(wait_emmc 45 | head -1)
@@ -169,6 +224,8 @@ if [ -z "$DEV" ]; then
 fi
 
 # eMMC enumerated as a block device ---------------------------------------------
+live EMMC_DETECTED EMMC_DETECTED
+live EMMC_DETECTED TARGET_GUARD
 gwr_guard "$DEV" || result ABORTED_TARGET_SAFETY_CHECK "TARGET_IDENTIFICATION_FAILED. Nothing was erased. See destructive-actions.txt."
 M=$(basename "$DEV"); D=/sys/block/$M/device
 {
@@ -179,6 +236,7 @@ M=$(basename "$DEV"); D=/sys/block/$M/device
   if command -v mmc >/dev/null; then mmc extcsd read "$DEV" 2>&1 | head -80; else echo "mmc-utils absent"; fi
 } | tee -a "$HW" >> "$DA"
 
+live DESTRUCTIVE_RECOVERY ERASE
 dlog "BEGIN destructive recovery on $DEV"
 sync
 for p in $(lsblk -nro NAME "$DEV" | tail -n +2); do umount "/dev/$p" 2>>"$DA"; done
@@ -210,6 +268,7 @@ reprobe; DEV2=$(wait_emmc 60 | head -1); dlog "post-erase device=${DEV2:-none}"
 gwr_guard "$DEV2" || result ABORTED_TARGET_SAFETY_CHECK "guard failed after reprobe"
 DEV=$DEV2
 
+live DESTRUCTIVE_RECOVERY READWRITE_VERIFY
 SZ=$(blockdev --getsize64 "$DEV"); MB=1048576; BAD=0
 for pos in 0 $(( (SZ/2/MB)*MB )) $(( SZ-MB )); do
   gwr_guard "$DEV" || result ABORTED_TARGET_SAFETY_CHECK "guard failed in verify"
@@ -226,6 +285,7 @@ done
 # --- optional install of verified ZTL-A568 Armbian image ----------------------
 PAY="$MNT/payload"
 if [ -f "$PAY/target.img.zst" ] && [ -f "$PAY/target.img.size" ] && [ -f "$PAY/target.img.sha256" ]; then
+  live DESTRUCTIVE_RECOVERY INSTALL
   gwr_guard "$DEV" || result ABORTED_TARGET_SAFETY_CHECK "guard failed before install"
   IMGB=$(cat "$PAY/target.img.size"); H2=$(awk '{print $1}' "$PAY/target.img.sha256")
   dlog "verify payload integrity"
