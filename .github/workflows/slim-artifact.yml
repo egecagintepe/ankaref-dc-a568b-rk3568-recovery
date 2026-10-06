@@ -1,0 +1,67 @@
+name: Create slim verified recovery artifact
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  slim:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SOURCE_RUN_ID: "37453780028"
+      SOURCE_ARTIFACT: "great-wall-recovery-verified"
+    steps:
+      - name: Download verified artifact
+        run: |
+          mkdir -p source slim
+          gh run download "$SOURCE_RUN_ID" \
+            -R "$GITHUB_REPOSITORY" \
+            -n "$SOURCE_ARTIFACT" \
+            -D source
+          ls -lh source
+
+      - name: Verify required files
+        run: |
+          set -euo pipefail
+          test -s source/great-wall-dc-a568-recovery.img.zst
+          test -s source/great-wall-dc-a568-recovery.img.sha256
+          test -s source/BUILD-REPORT.md
+          test -s source/verify-final.txt
+
+          grep -q '^PASS: destructive-command + guard static review' source/verify-final.txt
+          if grep -q '^FAIL:' source/verify-final.txt; then
+            echo "verify-final.txt contains FAIL"
+            exit 1
+          fi
+
+      - name: Build slim package
+        run: |
+          cp source/great-wall-dc-a568-recovery.img.zst slim/
+          cp source/great-wall-dc-a568-recovery.img.sha256 slim/
+          cp source/BUILD-REPORT.md slim/
+          cp source/verify-final.txt slim/
+          cp source/new-script.sha256 slim/ 2>/dev/null || true
+          cp source/armbian-commit.txt slim/ 2>/dev/null || true
+          cp source/source-commits.txt slim/ 2>/dev/null || true
+
+          {
+            echo "SOURCE_RUN_ID=$SOURCE_RUN_ID"
+            echo "SOURCE_ARTIFACT=$SOURCE_ARTIFACT"
+            echo "SOURCE_ZST_SHA256=$(sha256sum source/great-wall-dc-a568-recovery.img.zst | awk '{print $1}')"
+            echo "SOURCE_ZST_BYTES=$(stat -c %s source/great-wall-dc-a568-recovery.img.zst)"
+          } > slim/SLIM-METADATA.txt
+
+          ls -lh slim
+
+      - name: Upload slim artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: great-wall-recovery-slim
+          path: slim/
+          retention-days: 14
+          compression-level: 0
