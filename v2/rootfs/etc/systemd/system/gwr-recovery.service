@@ -1,0 +1,25 @@
+[Unit]
+Description=Great Wall V2 - DC-A568B internal eMMC recovery
+Documentation=file:/etc/gwr-build-info
+# Independent of networking: no network-pre/network-online ordering, so NetworkManager/DHCP start in parallel
+# and the recovery never waits for (or depends on) the network.
+DefaultDependencies=no
+After=local-fs.target systemd-udevd.service
+Wants=local-fs.target
+Conflicts=shutdown.target
+Before=shutdown.target
+
+[Service]
+# Type=exec: "started" as soon as the script is exec'd, so nothing waits for the long recovery run.
+Type=exec
+ExecStart=/usr/local/sbin/gwr-recovery.sh
+TimeoutStartSec=0
+TimeoutStopSec=30
+KillMode=mixed
+StandardOutput=journal+console
+StandardError=journal+console
+OOMScoreAdjust=-500
+Nice=-5
+
+[Install]
+WantedBy=multi-user.target

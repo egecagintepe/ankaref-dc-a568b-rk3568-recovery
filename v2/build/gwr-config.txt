@@ -1,0 +1,12 @@
+# Great Wall V2 configuration. Numeric values only; out-of-range values are ignored (defaults kept).
+# Host reprobes (driver unbind/bind of fe310000.mmc) before anything else (0-10)
+REBIND_ATTEMPTS=3
+# 1 = pulse EMMC_RSTn (GPIO1_C7) if the line is unused by any driver (0/1)
+RSTN_PULSE=1
+# Power-on soak: card stays powered, host reprobed every SOAK_INTERVAL_S (0-240 min, 60-1800 s)
+SOAK_MINUTES=60
+SOAK_INTERVAL_S=300
+# 1 = write the golden image after a successful erase + read/write verification (0/1)
+INSTALL=1
+# Upper bound for the zero-write fallback (600-21600 s)
+ZERO_WRITE_TIMEOUT_S=10800
