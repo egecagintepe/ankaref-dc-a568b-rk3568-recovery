@@ -1,4 +1,4 @@
-name: Great Wall Recovery - DC_A568 RK3568
+name: "[DEPRECATED V1 - do not run, see README] Great Wall Recovery - DC_A568 RK3568"
 on:
   workflow_dispatch:
     inputs:

@@ -1,4 +1,4 @@
-name: Verify and patch recovery image (no Armbian rebuild)
+name: "[DEPRECATED V1 - do not run, see README] Verify and patch recovery image (no Armbian rebuild)"
 on:
   workflow_dispatch:
     inputs:

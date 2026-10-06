@@ -1,4 +1,4 @@
-name: Create slim verified recovery artifact
+name: "[DEPRECATED V1 - do not run, see README] Create slim verified recovery artifact"
 
 on:
   workflow_dispatch:
