@@ -1,6 +1,6 @@
 #!/bin/bash
 # Static verification of the finished image (read-only loop mounts of the IMAGE FILE).
-set -uo pipefail
+set -o pipefail
 IMG=$1; fail=0
 chk(){ if eval "$2"; then echo "PASS: $1"; else echo "FAIL: $1"; fail=1; fi; }
 echo "== partition table"; sgdisk -p "$IMG"
@@ -26,7 +26,9 @@ chk "recovery service enabled" "[ -L $R/etc/systemd/system/multi-user.target.wan
 chk "recovery script installed" "[ -x $R/usr/local/sbin/gwr-recovery.sh ]"
 chk "resize service disabled" "! [ -L $R/etc/systemd/system/*.wants/armbian-resize-filesystem.service ]"
 chk "payload present+sha" "[ -s /mnt/v-log/payload/target.img.zst ] && [ -s /mnt/v-log/payload/target.img.sha256 ]"
-chk "guard present in script" "grep -q 'gwr_guard()' $R/usr/local/sbin/gwr-recovery.sh && grep -c 'gwr_guard \"' $R/usr/local/sbin/gwr-recovery.sh | awk '\$1>=6{f=1} END{exit !f}'"
-# every destructive command must be preceded by a guard within the same block
-chk "no destructive cmd on non-guarded device var" "! grep -nE '(blkdiscard|wipefs|dd .*of=)' $R/usr/local/sbin/gwr-recovery.sh | grep -vE '\\$DEV|WORK|\\$MNT|DA' "
+chk "destructive-command + guard static review" "bash $(dirname "$0")/check-destructive.sh $R/usr/local/sbin/gwr-recovery.sh"
+echo "== recovery script from image (head of guard)"; awk '/^gwr_guard\(\)/,/^}/' $R/usr/local/sbin/gwr-recovery.sh
+echo "== payload"; (cd /mnt/v-log/payload && cat target.img.size target.img.sha256 && zstdcat target.img.zst | sha256sum)
+chk "payload sha256 matches" "[ \"\$(zstdcat /mnt/v-log/payload/target.img.zst | sha256sum | cut -d' ' -f1)\" = \"\$(cut -d' ' -f1 /mnt/v-log/payload/target.img.sha256)\" ]"
+chk "payload size matches" "[ \"\$(zstdcat /mnt/v-log/payload/target.img.zst | wc -c)\" = \"\$(cat /mnt/v-log/payload/target.img.size)\" ]"
 exit $fail

@@ -218,6 +218,7 @@ for pos in 0 $(( (SZ/2/MB)*MB )) $(( SZ-MB )); do
   sync; echo 3 > /proc/sys/vm/drop_caches
   timeout 120 dd if="$DEV" of="$WORK/rb.bin" bs=$MB skip=$((pos/MB)) count=1 iflag=direct status=none 2>>"$DA"; r=$?
   if cmp -s "$WORK/pat.bin" "$WORK/rb.bin"; then dlog "verify@$pos OK (w=$w r=$r)"; else dlog "verify@$pos MISMATCH (w=$w r=$r)"; BAD=1; fi
+  gwr_guard "$DEV" || result ABORTED_TARGET_SAFETY_CHECK "guard failed before restore"
   head -c $MB /dev/zero | timeout 120 dd of="$DEV" bs=$MB seek=$((pos/MB)) oflag=direct conv=fsync status=none 2>>"$DA"
 done
 [ $BAD -eq 0 ] || result EMMC_ERASED_VERIFY_FAILED "Erase completed but write/read-back verification FAILED (see destructive-actions.txt)."
@@ -232,7 +233,8 @@ if [ -f "$PAY/target.img.zst" ] && [ -f "$PAY/target.img.size" ] && [ -f "$PAY/t
   if [ "$HP" = "$H2" ]; then
     dlog "payload sha256 OK; writing to $DEV"
     zstdcat "$PAY/target.img.zst" | timeout 3000 dd of="$DEV" bs=4M oflag=direct conv=fsync status=none 2>>"$DA"; rc=${PIPESTATUS[1]}; dlog "install dd exit=$rc"
-    sync; sgdisk -e "$DEV" >>"$DA" 2>&1; blockdev --rereadpt "$DEV" >>"$DA" 2>&1; sleep 3
+    sync; gwr_guard "$DEV" || result ABORTED_TARGET_SAFETY_CHECK "guard failed before sgdisk"
+    sgdisk -e "$DEV" >>"$DA" 2>&1; blockdev --rereadpt "$DEV" >>"$DA" 2>&1; sleep 3
     echo 3 > /proc/sys/vm/drop_caches
     H1=$(head -c "$IMGB" "$DEV" | sha256sum | awk '{print $1}')
     dlog "readback sha256=$H1 expected=$H2"
